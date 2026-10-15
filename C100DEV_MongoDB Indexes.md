@@ -13,7 +13,7 @@ https://learn.mongodb.com/learn/course/mongodb-indexes
 # 考試註記
 1. create { status: 1, orderDate: -1, customerId: 1 }
    查詢時 db.orders.find({ status: 'shipped', orderDate: { $gte: ISODate('2024-01-01') }, customerId: 'C123' })
-   會因為範圍性查詢導致index失效
+   範圍查詢不會自動讓索引失效。此查詢仍可能使用現有索引；若主要需求為 status、customerId 等值匹配加 orderDate 範圍，可評估 { status: 1, customerId: 1, orderDate: -1 }，並以 explain("executionStats") 比較 totalKeysExamined、totalDocsExamined 與 nReturned。
 
 
 
@@ -48,7 +48,7 @@ https://learn.mongodb.com/learn/course/mongodb-indexes
    * MongoDB only fetches the documents indentified by the index based on the query. 可以依照索引更快的回傳結果
   
    * There is one default index per collection, which includes only the _id field  
-   *  Every query should use an index  
+   *  Indexes should support important query patterns; a collection scan can be reasonable for small collections or queries returning most documents.  
 
    注意: 索引具有寫入效能的成本, 在插入新的文件或更新時, 也需要針對索引去更動. 此外, 如果collection有太多索引, 反而會造成寫入效能降低.  
    
@@ -60,12 +60,12 @@ https://learn.mongodb.com/learn/course/mongodb-indexes
 5. index所佔用資料
    * Document Identity (索引鍵（Index Keys）+（RecordID / Pointer）
    * 索引鍵（Index Keys）：你指定的特定欄位欄位值
-   * 記錄識別碼（RecordID / Pointer）：指向硬碟中完整文件的指標，由 WiredTiger 儲存引擎產生的內部 64 位元整數（意即底層的 Location Pointer）。它代表這份完整文件在硬碟/記憶體資料區塊中的具體實體位置。
+   * 記錄識別碼（RecordId）：儲存引擎用來定位文件的內部記錄識別碼，不應理解成固定的實體磁碟或記憶體位址。一般非叢集集合的 RecordId 不等同文件的 _id；表示方式依集合與儲存實作而異。
    * 舉例  
-     執行: db.users.createIndex({ age: 1 }  
+     執行: db.users.createIndex({ age: 1 })  
      Index Keys: 25  
-     RecordID: RecordID(12345)（並非 _id，而是比 _id 更底層的記憶體/磁碟定位符號）  
-     執行: db.users.createIndex({ { name: 1, age: -1 } }  
+     RecordID: RecordId(12345)（內部識別碼示意，並非實體位址）  
+     執行: db.users.createIndex({ name: 1, age: -1 })  
      Index Keys: ["Alice", 25]  
   ```sql
 {
@@ -121,7 +121,7 @@ D. 說明：索引對查詢有積極（正面）的影響，對寫入則會造�
 
 * MongoDB 在 _id 欄位會自動建立單一欄位索引。  
 * Multikey 索引是自動推斷的，不需特別指定，只要索引欄位是陣列就會自動變為 multikey。  
-* 複合索引查詢時建議遵守前綴欄位排序，如：{a: 1, b: 1} 能支援查詢 {a} 或 {a, b}，但不能只查 {b}。  
+* 複合索引 {a:1,b:1} 可有效支援以 a 為前綴的查詢；只有 b 的查詢通常無法有效縮小索引掃描範圍，不應推論它必然只能使用 COLLSCAN。查詢物件內條件的書寫順序不需與索引欄位順序相同。  
 
 
 
@@ -136,7 +136,7 @@ D. 說明：索引對查詢有積極（正面）的影響，對寫入則會造�
    * Identify indexes by using getIndexes()  
    * Determine the indexes being userd in a query by using explain()
      ```sql
-      db.coll.createdIndex({fieldname:1})
+      db.coll.createIndex({fieldname:1})
       ```
 
 2. **Single Field Indexes**
@@ -187,14 +187,14 @@ D. 說明：索引對查詢有積極（正面）的影響，對寫入則會造�
     * The **IXSCAN** stage indicates the query is using an index and what index is being selected.  
     * The **COLLSCAN** stage indicates a collection scan is perform, not using any indexes.  
     * The **FETCH** stage indicates documents are being read from the collection.  
-    * The **SORT** stage indicates documents are being sorted in memory.  
+    * The **SORT** stage indicates an additional sort; it may spill to disk depending on settings and limits.  
       
     | 階段名稱       | 說明                                      |
     | ---------- | --------------------------------------- |
-    | `IXSCAN`   | **Index Scan**：代表正在使用索引進行查詢。這是你期望看到的結果。 |
-    | `COLLSCAN` | **Collection Scan**：全表掃描。代表沒有使用索引，效能差。  |
+    | `IXSCAN`   | **Index Scan**：使用索引掃描；仍需比較掃描量與回傳量。 |
+    | `COLLSCAN` | **Collection Scan**：集合掃描；是否有性能問題取決於集合大小、選擇性與工作負載。  |
     | `FETCH`    | 代表依索引找到位置後，再讀取實際文件內容，通常是搭配 IXSCAN 使用。           |
-    | `SORT`     | 表示在記憶體中進行排序，若沒有用索引排序會耗費更多資源。            |
+    | `SORT`     | 額外排序；可能使用記憶體或溢寫磁碟，需依設定與執行統計判斷。            |
     | `PROJECTION_COVERED`     | 當查詢所需的欄位全部包含在索引中，MongoDB 不需 FETCH 文件即可回傳結果。            |
 
   
@@ -214,7 +214,7 @@ D. An index that supports efficient querying against fields that are already ind
 A. 說明：A single field index is an index that supports efficient querying against a single field. By default, all collections have a single field index on the _id field, but users can define additional indexes that support important queries. A single field index is also a multikey index if the value of the field is an array.
 B. 說明：An index that supports efficient queries against multiple fields is called a compound index.
 C. 說明：Single field indexes can also support efficient querying against a single array field.
-D. 說明：A single field index doesn't support efficient querying against fields that are already indexed by another user-defined index. When a single field is already indexed—for example, by a compound index—creating an additional single field index can cause over-indexing and performance issues.
+D. 說明：Incorrect. Whether another index exists does not define a single-field index. A single-field index can still support that field. A compound index may make a prefix index redundant only when the relevant options and query requirements are compatible; check unique, sparse, partial, and collation differences before removing it.
 解釋結束
 
 
@@ -302,8 +302,8 @@ Any index where one of the indexed fields contains an array
 The array can hold nested objects or other field types
 陣列可以包含巢狀物件或其他欄位類型
 
-In a compound index, only one field can be an array per index
-在複合索引中，每個索引只能有一個欄位是陣列
+In a compound index on separate fields, each indexed document can have at most one indexed field whose value is an array
+對一般 {a:1,b:1} 複合索引，每份文件的 a、b 最多一個是陣列；不同文件可分別由不同欄位為陣列
 
 
 **Understanding Multikey Indexes**  
@@ -328,7 +328,7 @@ Use explain() in a collection when running a query to see the Execution plan. Th
 * The IXSCAN stage indicates the query is using an index and what index is being selected.
 * The COLLSCAN stage indicates a collection scan is perform, not using any indexes.
 * The FETCH stage indicates documents are being read from the collection.
-* The SORT stage indicates documents are being sorted in memory.
+* The SORT stage indicates an additional sort; it may spill to disk depending on settings and limits.
 ```
 db.customers.explain().find({
   accounts: 627788
@@ -344,19 +344,16 @@ B. An index where one of the indexed fields contains an array
 C. An index on more than one field where none of the fields are arrays  
 D. An index on more than one field where multiple fields are arrays  
   
-**Ans: A**  
+**Ans: B**
 
-```
-A. A multikey index is any index where one of the indexed fields contains an array, including both single field and compound indexes. In a compound index, only one of the fields can be an array.
-B. Multikey indexes support efficient queries against array fields by creating an index key for each element in the array. This allows MongoDB to search for the index key of each element in the array rather than scan the entire array, which results in dramatic performance gains in your queries.
-C. A multikey index is any index where one of the indexed fields contains an array, including both single field and compound indexes. In a compound index, only one of the fields can be an array.
-D. A multikey index is any index where one of the indexed fields contains an array, including both single field and compound indexes. In a compound index, only one of the fields can be an array.
-
-```
+A. 錯誤：這是非陣列的單欄位索引。
+B. 正確：Multikey 索引用於陣列欄位，可以是單欄位或複合索引。對同一文件中重複的陣列值，不會重複建立相同索引項目。
+C. 錯誤：多欄位但沒有陣列，是一般複合索引。
+D. 錯誤：Multikey 不以多個陣列欄位為必要條件；一般複合索引也不能索引同一文件中的平行陣列。
 
 **Q&A**
 
-**What is the maximum number of array fields per multikey index? (Select one.)**
+**For a compound index {a:1,b:1}, how many of these separate fields may be arrays in the same document? (Select one.)**
 
 a. 1  
 
@@ -369,13 +366,13 @@ d. Unlimited
 **Ans: A**  
 
 ```
-a. Correct! The maximum number of array fields per multikey index is 1. If an index has multiple fields, only one of them can be an array.
+a. Correct! For this compound index, at most one of a and b may be an array in each document.
 
-b. Incorrect. The maximum number of array fields per multikey index is not 3. However, there is a limitation on the number of array fields per index.
+b. Incorrect. 對題目的 {a:1,b:1}，同一文件最多一個欄位為陣列。
 
-c. Incorrect. The maximum number of array fields per multikey index is not 5. However, there is a limitation on the number of array fields per index.
+c. Incorrect. 限制以每份文件判斷，不是 5。
 
-d. Incorrect. The maximum number of array fields per multikey index is not unlimited.
+d. Incorrect. 同一文件不能同時以 a、b 兩個平行陣列建立此索引。
 
 ```
 
@@ -392,7 +389,7 @@ How to use a compound index to sort or cover queries 如何使用複合索引來
 
 Index on multiple fields 多欄位索引  
 Can be a multikey index if it includes an array field 如果包含陣列欄位，可以是多鍵索引  
-Maximum of one array field per index  每個索引最多只有一個陣列欄位  
+For separate indexed fields, at most one may be an array in each document；限制以每份文件判斷，不能建立平行陣列索引。  
 
 Support queries that match on the prefix of the index fields
 支援對索引欄位前綴進行匹配的查詢
@@ -403,7 +400,7 @@ The order of the fields in a compound index matters
 複合索引中欄位的順序很重要
 
 Follow this order: Equality, Sort, Range
-遵循此順序：相等、排序、範圍
+一般優先使用相等、排序、範圍（ESR）。若範圍條件高度選擇性，可比較 ERS；ESR 是設計準則，不是語法限制。
 
 The sort order of the field values in the index matters
 索引中欄位值的排序順序很重要
@@ -489,7 +486,7 @@ Use explain() in a collection when running a query to see the Execution plan. Th
 The IXSCAN stage indicates the query is using an index and what index is being selected.
 The COLLSCAN stage indicates a collection scan is perform, not using any indexes.
 The FETCH stage indicates documents are being read from the collection.
-The SORT stage indicates documents are being sorted in memory.
+The SORT stage indicates an additional sort; it may spill to disk depending on settings and limits.
 ```
 db.customers.explain().find({
   birthdate: {
@@ -502,14 +499,14 @@ db.customers.explain().find({
     })
 ```
 **Cover a query by the Index**
-An Index covers a query when MongoDB does not need to fetch the data from memory since all the required data is already returned by the index.
+A covered query obtains all required data from an index without fetching full documents from the collection. Both query predicates and returned fields must be covered; exclude _id when it is not in the index. Multikey and other special cases have additional restrictions.
 
 In most cases, we can use projections to return only the required fields and cover the query. Make sure those fields in the projection are in the index.
 
-By adding the projection **{name:1,birthdate:1,_id:0}** in the previous query, we can limit the returned fields to only name and birthdate. These fields are part of the index and when we run the explain() command, the execution plan shows only two stages:
+By adding the projection **{name:1,birthdate:1,_id:0}** in the previous query, we can limit the returned fields to only name and birthdate. These fields are part of the index and when we run the explain() command, a classic execution plan may show the following stages (exact names and structure vary by version and execution engine):
 
 * IXSCAN - Index scan using the compound index
-* PROJECTION_COVERED - All the information needed is returned by the index, no need to fetch from memory
+* PROJECTION_COVERED - All the information needed is returned by the index, no need to fetch full documents
 
 ```
 db.customers.explain().find({
@@ -529,45 +526,15 @@ db.customers.explain().find({
 
 
 * 前綴原則（Prefix Rule）
-  複合索引指的是由多個欄位組合而成的單一索引。例如
-  ```sql
-  db.users.createIndex({ db: 1, collection: 1, status: 1 })
-  ```  
-  所謂的「前綴（Prefixes）」，指的是這個索引由左至右依序組合出來的「子集」。以上述索引為例，它所擁有的合法字首前綴包含以下兩種組合：  
-  第一前綴： { db: 1 }  
-  第二前綴： { db: 1, collection: 1 }  
-  (註：包含完整三個欄位的 { db: 1, collection: 1, status: 1 } 自然也適用，但它通常被直接視為索引本身，而非前綴。)
 
-  前綴原則的核心定義是：**一個複合索引，只能支援「以該索引前綴開始」的查詢條件。**  
-  B-Tree 在排序複合索引時，是嚴格遵循「先比較左邊欄位，左邊相同時，才比較右邊欄位」的順序
-  
-  情況 A：完全匹配（極高效）  
-  ```sql
-  db.users.find({ db: "test", collection: "orders", status: "active" })
-  ```  
-  情況 B：部分匹配，且符合前綴（高效）
-  ```sql
-  db.users.find({ db: "test" })
-  db.users.find({ db: "test", collection: "orders" })
-  ```
-  支援。 這兩個查詢分別命中了「第一前綴」與「第二前綴」。這代表你不需要單獨為 { db: 1 } 建立另一個獨立索引，這個複合索引已經兼顧了它的功能。  
-      
-  情況 C：不符合前綴（完全不支援）  
-  ```sql
-  db.users.find({ db: "test", status: "active" })
-  ```
-  不支援。 這些查詢都跳過了最左邊的 db 欄位。對 WiredTiger 儲存引擎來說，少了最左邊的排序基準，右邊的資料在 B-Tree 中是無序、分散的，因此無法進行索引掃描（IXSCAN），只能被迫走全表掃描（COLLSCAN）。
-  
-  前綴中間「斷層」會怎樣？
-  ```sql
-  db.users.find({ db: "test", status: "active" })
-  ```
-  結論： 這個查詢雖然有用到索引來縮小 scope，但只能發揮「部分優化」的效果，效率不如連續匹配的前綴。
+  索引 `{db:1, collection:1, status:1}` 的前綴從最左欄位連續開始，例如 `{db:1}`、`{db:1,collection:1}`。
 
-
-
-
-
+  - `find({db:"test"})` 與 `find({db:"test",collection:"orders"})` 可利用前綴。
+  - `find({db:"test",status:"active"})` 仍包含最左欄位 db，可利用索引縮小範圍，但跳過 collection，通常不如專為 db、status 建立的索引直接。
+  - `find({status:"active"})` 缺少最左前綴，通常不能有效縮小此索引的掃描範圍；不能據此斷言絕不可能出現 IXSCAN。
+  - 查詢條件在物件中的書寫順序，不必與索引定義順序相同。
+  - 是否實際選用索引及其效率，以 `explain("executionStats")` 判斷；不要只看有沒有 IXSCAN。
+  - 複合索引可能取代前綴單欄位索引，但移除前需確認 unique、sparse、partial、collation 等選項與工作負載。
 
 **Q&A**
 
@@ -787,7 +754,7 @@ a.
 The performance of the query will improve.
 Incorrect. 
 
-Deleting an index that is supporting a query won’t improve the performance. However, it might cause MongoDB to have to scan the entire database to find the documents that match the query.
+Deleting an index that is supporting a query won’t improve the performance. However, it might cause MongoDB to have to scan the entire collection to find the documents that match the query.
 
 b.
 The performance of the query will be negatively affected.
@@ -799,13 +766,13 @@ c.
 The query will fail.
 Incorrect. 
 
-Deleting the only index that is supporting a query won't cause it to fail. However, it might cause MongoDB to have to scan the entire database to find the documents that match the query.
+Deleting the only index that is supporting a query won't cause it to fail. However, it might cause MongoDB to have to scan the entire collection to find the documents that match the query.
 
 d.
 The query will perform as expected.
 Incorrect. 
 
-Deleting an index that is supporting a query will have an impact. It might cause MongoDB to have to scan the entire database to find the documents that match the query.
+Deleting an index that is supporting a query will have an impact. It might cause MongoDB to have to scan the entire collection to find the documents that match the query.
 
 
 
@@ -867,7 +834,7 @@ In this unit, we learned what indexes are and how they improve performance. We r
 
 * Single-field (one field)
 * Compound (2 to 32 fields)
-We worked with index properties like unique and understood that Multikey indexes are indexes that include one array field.
+We worked with index properties like unique and understood that Multikey indexes index array values; compound-index restrictions are evaluated per document.
 
 We used the following commands in the collection to create or delete indexes:
 
@@ -884,7 +851,7 @@ Finally, we learned how to view the indexes being used in a collection with the 
 
 A. 為了確保客服的每一個查詢都能維持最高效率，我們應該針對可能被查詢的 15 個欄位各自建立 Single Field Index。
 
-B. 當我們對包含排序（Sort）需求的欄位建立索引後，MongoDB 會依據建立時指定的欄位與方向排序儲存，這能有效消除查詢時在記憶體中進行排序（In-memory sort）的資源消耗。
+B. 當查詢條件及排序能由索引的欄位順序與方向支援時，MongoDB 可依索引順序取得結果，避免額外排序。
 
 C. 預設的 _id 索引只包含 _id 欄位，如果我們建立了一個包含 _id 的 Compound Index，原生的 _id 索引就會被自動刪除以節省空間。
 
@@ -897,7 +864,7 @@ D. 為了極大化加速寫入（Insert/Update）效能，我們應該在集合�
 詳細解析：
 
 選項 B 正確的原因：
-根據你的筆記核心：「Indexes 會依據建立時所提供的索引欄位和排序，將資料儲存在已建立的資料結構中。」當查詢包含 sort() 且該排序欄位已建立對應索引時，MongoDB 可以直接依序遍歷（Walk the index）並回傳結果，這能完全避免高成本的記憶體內排序（In-memory Sort），進而大幅減少 CPU 與記憶體資源的消耗。
+索引可避免額外排序，但不是只要排序欄位有索引就成立。複合排序須符合索引方向或整體反向；若排序使用非前綴欄位，前面的索引欄位通常須有等值條件。以 explain() 確認是否仍有 SORT。
 
 其他選項錯誤的原因：
 
@@ -905,5 +872,14 @@ D. 為了極大化加速寫入（Insert/Update）效能，我們應該在集合�
 
 選項 C 錯誤： 預設的 _id 索引是強制性且不可刪除的，它是由 MongoDB 自動建立且獨佔的，任何自定義的 Compound Index 都無法自動覆蓋或刪除原生的 _id 索引。
 
-選項 D 錯誤： 觀念完全顛倒。Multikey Index 是針對「陣列（Array）」欄位建立的索引，由於陣列中的每個元素都需要在索引結構中建立一個對應的 entry（點點相連），因此 Multikey Index 的寫入與維護成本比普通索引更高，絕不可能用來「分散寫入壓力」。
+選項 D 錯誤： 觀念完全顛倒。Multikey Index 是針對「陣列（Array）」欄位建立的索引，由於陣列中的不同值可能在索引結構中產生多個 entry（同一文件中的相同值不重複建立相同項目），因此 Multikey Index 的寫入與維護成本比普通索引更高，絕不可能用來「分散寫入壓力」。
 
+
+## 官方勘誤依據（2026-10-15）
+
+- [Compound indexes / prefixes](https://www.mongodb.com/docs/manual/core/indexes/index-types/index-compound/)
+- [Multikey indexes](https://www.mongodb.com/docs/manual/core/indexes/index-types/index-multikey/)
+- [ESR guideline](https://www.mongodb.com/docs/manual/tutorial/equality-sort-range-guideline/)
+- [Index-supported sorting](https://www.mongodb.com/docs/manual/tutorial/sort-results-with-indexes/)
+- [Covered queries](https://www.mongodb.com/docs/manual/core/query-optimization/)
+- [RecordId](https://www.mongodb.com/docs/manual/reference/method/cursor.showRecordId/)
