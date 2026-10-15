@@ -6,17 +6,16 @@ C100DEV-MongoDB CRUD Operations: Insert and Find Documents
 * [Lesson 2 : Finding Documents in a MongoDB Collection](#lesson-2--finding-documents-in-a-mongodb-collection)
 * [Lesson 3 : Finding Documents by Using Comparison Operators](#lesson-3--finding-documents-by-using-comparison-operators)
 * [Lesson 4 : Querying on Array Elements in MongoDB](#lesson-4--querying-on-array-elements-in-mongodb)
-* [Lesson 5 : Updating Documents in a MongoDB Collection](#lesson-5--updating-documents-in-a-mongodb-collection)
-* [Lesson 6 : Deleting Documents from a MongoDB Collection](#lesson-6--deleting-documents-from-a-mongodb-collection)
+* [Lesson 5 : Finding Documents by Using Logical Operators](#lesson-5--finding-documents-by-using-logical-operators)
 
 
 https://learn.mongodb.com/learn/course/mongodb-crud-operations-insert-and-find-documents/lesson-1-inserting-documents-in-a-mongodb-collection/learn
 
 # 考試註記
 
-1. 任何find的物件順序皆由系統控制, sort()、skip() 與 limit() 確保分頁與排序邏輯的正確性 [測試1-12]   
+1. 未使用 sort() 時不保證結果順序。排序值可能重複時，加入唯一欄位 _id 作次排序；跨請求分頁仍須考慮資料變動。以下游標在取用結果前設定排序、跳過及筆數限制：   
    ```sql
-   db.orders.find({ status: 'active' }).skip(10).limit(5).sort({ createdAt: -1 })
+   db.orders.find({ status: 'active' }).sort({ createdAt: -1, _id: -1 }).skip(10).limit(5)
    ```   
 2. 
 
@@ -31,13 +30,13 @@ https://learn.mongodb.com/learn/course/mongodb-crud-operations-insert-and-find-d
 
 In this unit, you will be introduced to CRUD operations in MongoDB by inserting and finding documents. Inserting and finding documents will help you discover the ease and usability of MongoDB. You'll also build your own queries that use comparison and logical operators. Using operators will make your queries more precise and, in turn, make your application easier to develop. Finally, you'll learn how to query elements in an array. Arrays are a crucial data type that you will encounter frequently, so it's important that you have a solid understanding of how to work with them.  
 
-* iesertOne(): 插入單個文檔  
+* insertOne(): 插入單個文檔  
 * insertMany(): 插入多個文檔
   * 不存在, 就會自動創建
 
 ```sql
-db.<collection>.iesertOne() 如果<collection>
-db.<collection>.iesertMany([<doc1>,<doc2>])
+db.example.insertOne({ name: "A" })
+db.example.insertMany([{ name: "B" }, { name: "C" }])
 ```
 
 ## Insert a Single Document  
@@ -129,13 +128,13 @@ D
 
 ## ordered
    
-使用 insertMany 時, 帶入參數 ordered, is skipped due to a duplicate key error, and the operation reports a partial success.   
+insertMany() 預設 ordered:true，遇到寫入錯誤會停止後續插入，已成功的寫入不會因此回滾。ordered:false 會繼續嘗試其他文件，但不保證執行順序，也不提供整批原子性。以下假設 orders 原本為空：兩筆 _id:2 互相衝突，不能依輸入位置保證哪一筆成功；其他有效文件仍會被嘗試插入。   
 
 ```sql   
 db.orders.insertMany([
   { _id: 1, item: "pen" },
   { _id: 2, item: "notebook" },
-  { _id: 2, item: "ruler" },    // duplicate — will fail
+  { _id: 2, item: "ruler" },    // 與另一筆 _id:2 衝突，unordered 不保證哪筆成功
   { _id: 3, item: "eraser" }
 ], { ordered: false })
 ```
@@ -160,6 +159,7 @@ db.<collection>.find()
 db.<collection>.find({
    <field> : { $in: 
      [<value>, <value>,...]
+   }
 })
 ```
 
@@ -167,7 +167,7 @@ db.<collection>.find({
 Review the following code, which demonstrates how to query documents in MongoDB.
 
 * Find a Document with Equality  
-When given equality with an _id field, the find() command will return the specified document that matches the _id. Here's an example:
+find() returns a cursor, even when filtering by _id. Use findOne() to return a matching document directly (or null if none matches). Here's an example:
 
 ```
 db.zips.find({ _id: ObjectId("5c8eccc1caa187d17ca6ed16") })
@@ -288,7 +288,7 @@ db.sales.find({ "customer.age": { $gte: 65}})
 
 QA
 
-Your company is conducting research on the customer experience and is focused on identifying unsatisfied customers. You need to find all customers with a satisfaction rating of 1 or 2.
+Your company is conducting research on the customer experience and is focused on identifying unsatisfied customers. Assume satisfaction ratings are integers from 1 through 5. You need to find all customers with a satisfaction rating of 1 or 2.
 
 Which of the following query documents would return all customers with a satisfaction rating of 1 or 2? (Select one.)
 
@@ -305,7 +305,7 @@ d.
 ==> D
 
 
-Your company wants to offer a special discount for customers who are 65 or older. Your task is to find the records for these customers. Which of the following queries would return documents for all customers 65 or older? (Select all that apply.)
+Assume age is stored as an integer number of years. Your company wants to offer a special discount for customers who are 65 or older. Your task is to find the records for these customers. Which of the following queries would return documents for all customers 65 or older? (Select all that apply.)
 
 a.
 { customer.age : { $gte : 65 }}
@@ -329,13 +329,13 @@ Review the following code, which demonstrates how to query array elements in Mon
 
 * Find Documents with an Array That Contains a Specified Value *
  
-In the following example, "InvestmentFund" is not enclosed in square brackets, so MongoDB returns all documents within the products array that contain the specified value.
+The query returns matching collection documents: products may equal the scalar "InvestmentFund" or be an array containing it. find() does not automatically trim the returned array to matching elements.
 
 db.accounts.find({ products: "InvestmentFund"})
 
 * Find a Document by Using the $elemMatch Operator *
   
-Use the $elemMatch operator to find all documents that contain the specified subdocument. For example:
+Use $elemMatch to find documents with at least one array element satisfying all conditions inside the same $elemMatch. For example:
   
 ```sql
 db.sales.find({
@@ -447,7 +447,7 @@ db.<collection>.find({
 db.routes.find({ $or: [{ dst_airport: "SEA" }, { src_airport: "SEA" }] })
 
 db.routes.find({
-  $and: [{ "airline": "Southwest Airlines" }, { "stops": { $gte: 1 } }],
+  $and: [{ "airline.name": "Southwest Airlines" }, { "stops": { $gte: 1 } }],
 })
 
 4. 複合邏輯查詢範例（$and 巢狀包包含 $or）
@@ -460,7 +460,7 @@ db.routes.find({
       { src_airport: "SEA" }
     ]},
     { $or: [
-      { airline: "American Airlines" },
+      { "airline.name": "American Airlines" },
       { airplane: 320 }
     ]},
   ]
@@ -505,7 +505,7 @@ What will the following query return? (Select one.)
 db.routes.find({
   $and: [
     { $or: [{ dst_airport: "IST" }, { src_airport: "IST" }] },
-    { $or: [{ stops: 0 }, { airline.name: "Turkish Airlines"}] },
+    { $or: [{ stops: 0 }, { "airline.name": "Turkish Airlines"}] },
   ]
 })
 ```
@@ -528,13 +528,13 @@ B:Incorrect. To return all flights that are either departing from the Istanbul a
 
 ```sql
 db.routes.find({
-  $or: [{ src_airport: "IST" }, { airline.name: "Turkish Airlines", stops: 0 }],
+  $or: [{ src_airport: "IST" }, { "airline.name": "Turkish Airlines", stops: 0 }],
 })
 ```
 C:Incorrect. To return only flights that are landing at the Istanbul airport or those operated by Turkish Airlines, you would write the following query:
 ```sql
 db.routes.find({
-  $or: [{ dst_airport: "IST" }, { airline.name: "Turkish Airlines" }],
+  $or: [{ dst_airport: "IST" }, { "airline.name": "Turkish Airlines" }],
 })
 ```
 D:Incorrect. To return all Turkish Airlines flights that are nonstop, you would write the following query:
@@ -607,7 +607,7 @@ Use the following resources to learn more about inserting and finding documents 
 
 ## Associate Certification Course Progress
 
-Progress Update: By completing this unit, you've finished 30% of the CRUD content necessary for the Associate Developer Certification exam.
+課程進度備註：原課程以本單元代表約 30% 的 CRUD 學習內容；這不是整體考試占比，也不代表完成本檔案即涵蓋全部 CRUD 考點。
 
 ### Next Steps
 If you're interested in continuing your certification preparation, your next step is to review the following units:
@@ -642,6 +642,8 @@ c.
 db.inventory.find();
 d.
 db.inventory.findMany().toArray()
+
+**答案：B。** find() 回傳 cursor；toArray() 會取用剩餘結果並建立陣列。本題是新建立的 cursor，因此取得全部 200 筆。大量資料須注意記憶體用量。
 
 
 
@@ -888,7 +890,7 @@ D. 3 個文檔
 其他選項錯誤的原因： * 選項 B、C、D 均假設 MongoDB 會自動將字串 "34" 或 "18" 轉換為數字進行比較，這不符合 MongoDB 的運作原理。如果要正確查出，資料庫內的值必須改為數值型態（如 age: 34），或者查詢條件必須針對字串排序規則設計。
 
 題目 2：[複選題 (選 2 個)]
-假設經過資料清洗後，user 集合中的 age 欄位已全數成功轉換為「數值（Number）」型態，資料如下：
+假設經過資料清洗後，user 集合中的 age 欄位已全數成功轉換為「非負整數年齡」，資料如下：
 
 JSON
 
@@ -956,14 +958,14 @@ D. db.user.find({ stats: { login_count: { $gt: 40 } } })
 
 A. { age: { $gt: 20 }, age: { $lt: 40 } }
 B. { age: { $gt: 20 }, $lt: 40 }
-C. { age: { $gt: 20, $lt: 40 } }
+C. { status: "active", age: { $gt: 20, $lt: 40 } }
 D. { $gt: 20, $lt: 40, age: true }
 
 正確答案： C
 核心考點： 單一欄位組合多個比較運算子的正確 JSON 宣告
 詳細解析：
 
-選項 C 正確的原因： 當我們要對「同一個欄位」（age）同時施加多個比較運算子條件（大於 20 且小於 40）時，正確的做法是將這些運算子合併寫在同一個內層物件中，用逗號隔開，即 { age: { $gt: 20, $lt: 40 } }。MongoDB 會將其視為邏輯與（AND）的關係。
+選項 C 正確的原因： 當我們要對「同一個欄位」（age）同時施加多個比較運算子條件（大於 20 且小於 40）時，正確的做法是將這些運算子合併寫在同一個內層物件中，用逗號隔開，即 { age: { $gt: 20, $lt: 40 } }。MongoDB 會將其視為邏輯與（AND）的關係。另以 status:"active" 限制活躍用戶，兩個欄位之間也是隱式 AND。
 
 其他選項錯誤的原因：
 
@@ -998,7 +1000,7 @@ D. db.user.find({ age: { $not: { $lt: 18 } } })
 
 選項 B 正確的原因： 由於資料庫中的年齡皆為整數，在邏輯上，「大於或等於 18（$gte: 18）」與「大於 17（$gt: 17）」所涵蓋的整數集合是完全一致的。對照現有資料，它會正確返回 18 歲與 34 歲的文檔。
 
-選項 D 正確的原因： 這是一個進階的邏輯取反組合。{ $lt: 18 } 代表「小於 18 歲（意即 17 歲以下）」，加上 $not 取反之後，意思就變成了「不是小於 18 歲」，亦即「大於或等於 18 歲」。因此也能成功返回 18 歲與 34 歲的文檔。
+選項 D 正確的原因：在本題三筆文件皆有數值 age 的限定資料中，$not:{$lt:18} 會返回 18 歲與 34 歲。但一般情況也會匹配缺少 age 的文件，不能無條件等同 $gte:18。$gt:17 與 $gte:18 的等價也只適用整數年齡。
 
 其他選項錯誤的原因：
 
@@ -1065,7 +1067,7 @@ D. 會同時成功返回 alex002 與 alex003 的文檔。
 
 選項 C 錯誤：題目中的查詢欄位 "status.interests" 已經正確使用了雙引號包裹，符合點號表示法（Dot Notation）的語法規範，不會報錯。
 
-題目 2：[複選題 (選 2 個)]
+題目 2：[單選題]
 公司的電商後台系統有一套產品訂單集合 sales，其中每個文檔都包含一個名為 items 的陣列欄位，用來儲存單次交易購買的多個商品明細。某一筆文檔結構如下：
 
 JSON
@@ -1080,7 +1082,7 @@ JSON
   ]
 }
 營運團隊希望找出「在同一個商品品項中，商品名稱為 laptop、單價大於 800 元、且購買數量大於或等於 1」的訂單。
-請問下列哪兩個查詢文檔（Query Documents）可以完全正確且安全地實現這個業務邏輯？（Select 2 answers）
+請問下列哪一個查詢文檔能對所有符合上述結構的訂單保證同一商品滿足全部條件？（Select one）
 
 A.
 
@@ -1123,13 +1125,13 @@ JSON
     { "items": { "$elemMatch": { "name": "laptop", "quantity": { "$gte": 1 } } } }
   ]
 }
-正確答案： A, D
+正確答案： A
 核心考點： $elemMatch 運算子確保陣列內嵌文檔的多條件多欄位匹配
 詳細解析：
 
 選項 A 正確的原因：根據 MongoDB 官方標準，當你需要對陣列（Array）中的「同一個內嵌文檔（Subdocument）」同時滿足多個篩選條件時，必須使用 $elemMatch 運算子，將所有條件包裹在同一個作用域中，這能精確定位到符合規格的單一商品。
 
-選項 D 正確的原因：雖然這個寫法較為冗長，但它利用 $and 邏輯運算子將兩個 $elemMatch 條件組合起來。第一個條件確保陣列中有某個商品的 name 是 "laptop" 且 price > 800；第二個條件確保陣列中有某個商品的 name 是 "laptop" 且 quantity >= 1。由於兩者都限定了 name: "laptop"，在外層 $and 的共同約束下，實際上是指向同一個商品品項，因此在邏輯上也是安全且正確的。
+選項 D 錯誤的原因：兩個 $elemMatch 可以各自匹配不同的 laptop 元素；同名不保證是同一元素。例如 items 為 [{name:"laptop",price:1200,quantity:0},{name:"laptop",price:500,quantity:1}]，D 會匹配，但沒有任何商品符合全部條件。
 
 其他選項錯誤的原因：
 
@@ -1259,7 +1261,7 @@ D. db.routes.find({ dst_airport: "SEA" } , { src_airport: "SEA" })
 
 其他選項錯誤的原因：
 
-選項 B 錯誤：這是不合法的邏輯結構，$or 不能以這種非對稱的巢狀方式直接掛載在另一個欄位的同級層。
+選項 B 錯誤：$or 的值必須是條件陣列，不能是單一物件。$or 可以與一般欄位同層，兩者之間採隱式 AND。
 
 選項 C 錯誤：$or 後面直接接了花括號物件 {}，漏掉了陣列方括號 []，這會導致 MongoDB 拋出語法錯誤。
 
@@ -1323,25 +1325,25 @@ D. 所有抵達伊斯坦堡機場（IST）的直飛航班，或者所有由土�
 核心考點： 複合邏輯查詢（$and 巢狀包含 $or）的商務邏輯解讀
 
 
-題目 4：[單選題]
+題目 4：[複選題（選 2 個）]
 行銷團隊希望在 routes 集合中，尋找「由 Southwest Airlines 營運且轉機次數（stops）大於或等於 1 次」的航線。開發人員想要透過顯式 $and（Explicit $and）來撰寫這個語法。
-請問下列哪一個是完全正確的顯式 $and 語法？
+請問哪些查詢包含合法的顯式 $and，且符合上述需求？（選 2 個）
 
 A. db.routes.find({ $and: [ "airline.name": "Southwest Airlines", stops: { $gte: 1 } ] })
 B. db.routes.find({ $and: [ { "airline.name": "Southwest Airlines" }, { stops: { $gte: 1 } } ] })
 C. db.routes.find({ "airline.name": "Southwest Airlines", $and: [ { stops: { $gte: 1 } } ] })
 D. db.routes.find({ $and: { "airline.name": "Southwest Airlines", stops: [ { $gte: 1 } ] } })
-正確答案： B
+正確答案： B, C
 核心考點： 顯式 $and 運算子的標準陣列元素宣告
 詳細解析：
 
 選項 B 正確的原因： 當使用顯式 $and 時，語法結構必須為 { $and: [ { 條件1 }, { 條件2 } ] }。陣列內部的每一個條件，都必須用獨立的花括號 {} 包裹成完整的 JSON 物件，選項 B 格式完全正確。
 
-其他選項錯誤的原因：
+其他選項說明：
 
 選項 A 錯誤：雖然加了陣列方括號 []，但陣列內部的兩個條件沒有分別用花括號 {} 包裹，這是不合法的 JavaScript/JSON 陣列語法。
 
-選項 C 錯誤：將其中一個條件抽到最外層，而 $and 陣列中只剩一個條件，雖然部分版本可能相容，但這不符合「顯式組合多條件」的正確標準寫法。
+選項 C 正確：$and 接受一個以上的條件。外層的 airline.name 條件與單元素 $and 採隱式 AND，因此 C 合法且與 B 符合相同需求。
 
 選項 D 錯誤：語法完全混亂，$and 後方直接使用了花括號物件，且比較運算子位置錯誤。
 
@@ -1383,3 +1385,11 @@ D. $nor
 
 
 
+
+## 官方勘誤依據（2026-10-15）
+
+- [insertMany / ordered](https://www.mongodb.com/docs/manual/reference/method/db.collection.insertMany/)
+- [$elemMatch](https://www.mongodb.com/docs/manual/reference/operator/query/elemMatch/)
+- [$and](https://www.mongodb.com/docs/manual/reference/operator/query/and/)
+- [$not](https://www.mongodb.com/docs/manual/reference/operator/query/not/)
+- [Cursor sorting](https://www.mongodb.com/docs/manual/reference/method/cursor.sort/)
