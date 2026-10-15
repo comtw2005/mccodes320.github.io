@@ -5,16 +5,19 @@ Lesson 2: ACID Transactions in MongoDB
 
 
 # 考試註記
-1. Read Concern
-  1.  local 讀取當前節點上的最新數據，不論該數據是否已被複製到其他節點。
-  2.  available 行為與 local 類似，但針對分片叢集（Sharded Cluster）優化，直接返回節點當前最快拿到的數據。
-  3.  majority 僅讀取已被多數（Majority）節點確認且寫入日誌（Journal）的持久化數據。
-  4.  linearizable 僅讀取已被多數節點確認的數據，且 Primary 在回應前必須即時向多數 Secondary 發送確認，確保自己此時此刻仍是唯一的 Primary。
-  * 安全性排序：linearizable > majority > local = available
-  * 效能（速度）排序：available $\ge$ local > majority > linearizable
-  * 金鑰考點：題目中只要出現 「財務應用 (financial)」、「絕對不會被回滾 (will not be rolled back)」、「多數成員確認 (majority of the replica set members)」，在沒有特殊強調防範雙主過時讀取的前提下，標準答案必然是 majority。
 
+本檔程式碼為 mongosh JavaScript；Java Driver 的參數、回傳型別與 session 傳遞方式須另查對應文件。
 
+1. Read concern 與 write concern 解決不同問題，不要只因題目出現「金融」就選 majority。
+   - local：讀取目前節點資料，不保證已多數提交，資料可能回滾。
+   - available：不保證多數提交；分片環境不做相同的 shard ownership 檢查，容忍分區，但可能讀到孤兒文件。
+   - majority：讀取多數提交的資料，不等於最新資料或跨分片同一時間點快照。
+   - linearizable：針對符合條件的單文件讀取提供即時順序保證；與 majority 不同，也不適用多文件交易。
+   - snapshot：提供同一時間點的快照；交易跨分片時可提供同步快照。
+2. 多文件交易可使用 local、majority、snapshot read concern；available、linearizable 不適用。
+3. 交易內 majority／snapshot 的多數提交資料保證，需搭配以 write concern {w:"majority"} 提交；以 w:1 提交仍可能在故障轉移時回滾。
+4. 不使用固定的安全性或速度排名作答；依題目所需的原子性、可見性、快照與寫入確認保證選擇。
+5. 多文件交易適用於 replica set 或 sharded cluster，不支援 standalone。Session 本身不代表交易已開始。
 
 Lesson 1: Introduction to ACID Transactions
 ---
@@ -32,15 +35,15 @@ Guarantees that every transaction is "all or nothing" when committing data to a 
 
 Consistency 一致性
 
-Guarantees that the data written to the database is consistent with database constraints. For example, if an account balance cannot be less than 0, a transaction would fail before violating this constraint.
+一致性要求操作維持已定義的約束。MongoDB 不會自動知道餘額不能為負等業務規則；必須以更新條件、驗證規則或應用程式檢查實作，並在必要時中止交易。
 
 Isolation 隔離
 
-Guarantees that each transaction that is run concurrently leaves the database in the same state as if the transactions were run sequentially. In other words, multiple transactions can happen at the same time without affecting the outcome of the other transactions.
+隔離性描述並行操作之間的隔離保證。MongoDB 交易不可直接推論為所有並行結果都等同循序執行；讀取保證取決於 read concern，snapshot isolation 也不等於完整 serializable isolation。應明確設計業務約束並處理寫入衝突。
 
 Durability 耐久性
 
-Durability: Guarantees that data is never lost. Data is saved to non-volatile memory, so any modifications made to data by a successful transaction will persist, even in the event of a power or hardware failure.
+Durability（持久性）描述已提交變更的保存保證；MongoDB 的實際故障保證取決於 write concern、journaling 與部署設定。以 w:1 提交的交易仍可能在故障轉移時回滾，不能概括為任何故障下資料永不遺失。
 
 
 QA
@@ -110,7 +113,7 @@ Lesson 2: ACID Transactions in MongoDB
 A group of db operations that will be completed as a unit or not at all. 
 
 ### Single-document operations are already atomic in MondoDB
-僅影響一個Collection基本上在mongoDB本質上就是原子的
+MongoDB 的單一文件寫入具原子性。即使 updateMany() 只操作同一個 collection，也僅保證每份文件的修改各自原子，不保證整批修改全部成功或全部失敗；需要整批原子性時才使用多文件交易。
 
 類似updateOne，將修改後的結果同時展示給客戶端
 <img width="1161" height="795" alt="image" src="https://github.com/user-attachments/assets/83c34e30-3982-47de-907e-f98624581f8c" />
@@ -136,7 +139,7 @@ A group of db operations that will be completed as a unit or not at all.
 
 All single-document operations are atomic。  
   
-No extra steps are needed to provide ACID propertoes to single-document operations  
+單一文件寫入不需多文件交易即可取得原子性；讀取一致性與故障持久性仍須依 read/write concern 與部署設定判斷。  
 
 <img width="482" height="456" alt="image" src="https://github.com/user-attachments/assets/95ad000e-71c6-43cc-8ded-141b9c215b40" />
 
@@ -212,7 +215,7 @@ Lesson 3: Using Transactions in MongoDB
 
 示範多文件交易與中斷多文件交易，帳戶之間的資金轉移。 
 
-因為是資金交易, 預設60秒內完成  
+交易預設生命週期限制約一分鐘，由 transactionLifetimeLimitSeconds 控制；這是一般交易限制，與是否為資金交易無關。  
 
 兩個帳戶舉例如下
 <img width="1136" height="757" alt="image" src="https://github.com/user-attachments/assets/34dfe597-981a-4be5-87b0-023ad8425f9f" />
@@ -226,8 +229,8 @@ Used to group database operations that are related to each other and should be r
 
 Using the mongosh tab, run the following command to create a session variable for the multi-document transaction:
   
-```SQL
-const session = db.getMongo().startSession()    # 進入mongodb Session
+```javascript
+const session = db.getMongo().startSession()    // 進入mongodb Session
 ```
 
 This command creates a new session, but it hasn't started a transaction yet. In the next step, you'll start the transaction using this session
@@ -235,19 +238,19 @@ This command creates a new session, but it hasn't started a transaction yet. In 
 
 Next, start a transaction using the session variable you created:
  
-```SQL
-session.startTransaction()                      # 開始交易
+```javascript
+session.startTransaction()                      // 開始交易
 ```
 
 Now use the following command to create an account variable which is a reference to the accounts collection using the session you created:
 
-```SQL
-const account = session.getDatabase('bank').getCollection('accounts')                         # 帳戶合集的操作
+```javascript
+const account = session.getDatabase('bank').getCollection('accounts')                         // 帳戶合集的操作
 ```
-```SQL
+```javascript
 account.updateOne({ account_id: "MDB740836066"} , {$inc: {balance: -30}})
 ```
-```SQL
+```javascript
 
 account.updateOne({ account_id: "MDB963134500"} , {$inc: {balance: 30}})
 
@@ -255,8 +258,8 @@ account.updateOne({ account_id: "MDB963134500"} , {$inc: {balance: 30}})
 
 Finally, complete the transaction on the session using the following command:
 
-```sql
-session.commitTranscation()
+```javascript
+session.commitTransaction()
 ```
 
 
@@ -268,12 +271,12 @@ ACID transactions in MongoDB are typically used only by applications where value
 ### Using a Transaction: Video Code
 Here is a recap of the code that's used to complete a multi-document transaction:
 
-```SQL
-const session = db.getMongo().startSession()    # 進入mongodb Session
+```javascript
+const session = db.getMongo().startSession()    // 進入mongodb Session
 
-session.startTransaction()                      # 開始交易
+session.startTransaction()                      // 開始交易
 
-const account = session.getDatabase('< add database name here>').getCollection('<add collection name here>')                         # 帳戶合集的操作
+const account = session.getDatabase('< add database name here>').getCollection('<add collection name here>')                         // 帳戶合集的操作
 
 //Add database operations like .updateOne() here
 
@@ -281,12 +284,12 @@ session.commitTransaction()
 ```
 
 ### Aborting a Transaction
-If you find yourself in a scenario that requires you to roll back database operations before a transaction is completed, you can abort the transaction. Doing so will roll back the database to its original state, before the transaction was initiated.
+If you find yourself in a scenario that requires you to roll back database operations before a transaction is completed, you can abort the transaction. This discards only the changes made in the current uncommitted transaction; it does not restore the entire database or undo other committed operations.
 
 
 ### Aborting a Transaction: Video Code
 Here is a recap of the code that's used to cancel a transaction before it completes:
-```sql
+```javascript
 const session = db.getMongo().startSession()
 
 session.startTransaction()
@@ -310,7 +313,7 @@ You are creating a transaction that does the following:
 
 The transaction looks like this: 
 
-```sql
+```javascript
 const session = db.getMongo().startSession()
 
 session.startTransaction()
@@ -349,7 +352,7 @@ A:.endTransaction() is not a valid method in MongoDB.
 
 B:We use .commitTransaction() to commit a transaction.session.commitTransaction() should be placed at the end of the transaction.
 
-C:endSessions() expires specific sessions and will not commit a transaction.
+C: endSessions 是資料庫命令名稱，不是此處的 session helper；session.endSession() 用於結束 session，不能代替 commitTransaction()。
 
 D:completeTransaction() is not a valid method in MongoDB.
 
@@ -357,9 +360,9 @@ D:completeTransaction() is not a valid method in MongoDB.
 
 
 
-Select one or more answer choices and then click "See Results" to submit.
+選擇一個答案。注意：這裡考的是方法用途，不是 shell 顯示輸出；mongosh commitTransaction() 與 abortTransaction() 不回傳值。
 
-Which of the following commands will output to the shell if they are successful?
+Which mongosh method commits the current transaction? (Select one.)
 
 a.
 .startTransaction()
@@ -389,3 +392,11 @@ Use the following resources to learn more about ACID transactions in MongoDB:
 
 What are ACID transactions?
 How do ACID transactions work in MongoDB?
+
+## 官方勘誤依據（2026-10-15）
+
+- [Atomicity and transactions](https://www.mongodb.com/docs/manual/core/write-operations-atomicity/)
+- [Transactions / read and write concern](https://www.mongodb.com/docs/manual/core/transactions/)
+- [Transaction lifetime](https://www.mongodb.com/docs/manual/core/transactions-production-consideration/)
+- [commitTransaction](https://www.mongodb.com/docs/manual/reference/method/Session.commitTransaction/)
+- [abortTransaction](https://www.mongodb.com/docs/manual/reference/method/Session.abortTransaction/)
