@@ -3,6 +3,10 @@
 
 ### Exam Study Guide
 
+> 版本說明（2026-10-15）：下表保留本教材收錄的考綱與比例（CRUD 51%、Indexes 17%）；本次勘誤未取得完整官方考綱供重新確認比例，不宣稱這是最新版本。實際範圍以報考時的官方 Study Guide 為準。
+>
+> 本筆記以 Java Driver 為主要複習方向；原考綱中的 XX／XXX 代表所選語言的 driver。mongosh 範例另行標示，不能把 shell 的參數或回傳型別直接套到 Java。
+
 [Exam Study Guide](https://learn.mongodb.com/learn/course/mongodb-associate-developer-exam-study-guide/main/associate-dba-exam-study-guide)
 
 | 編號 | 考核內容 (Learning Objectives) |
@@ -61,6 +65,36 @@
 
 
 
+## 教材勘誤對照（2026-10-15）
+
+以下為本儲存庫教材修正摘要，不是新增的官方考核目標或權重。
+
+| 考綱目標 | 同步教材 | 修正後複習重點 |
+| --- | --- | --- |
+| 2.1、6.5 | CRUD Lesson 1 | insertOne(document)、insertMany([documents], options)；ordered:false 不保證順序或整批原子性。 |
+| 2.5、2.6 | Transactions Lesson 2 | 原子性基本單位是文件；同一 collection 的 updateMany() 不保證整批原子性。 |
+| 2.9、2.12 | CRUD Lesson 4 與陣列題 | 同一元素的條件須放在同一個 $elemMatch；陣列題 2 改為單選 A，分開的 $elemMatch 不能保證同元素。 |
+| 2.10、2.13 | CRUD 比較／邏輯題 | 整數與欄位存在前提需明示；$not 不可無條件當成相反比較運算子；活躍用戶題須加 status 條件。 |
+| 2.13 | CRUD 邏輯題 4 | $and 可包含一個以上條件，且可與其他欄位同層；改為複選 B、C。 |
+| 2.14–2.16 | CRUD、Indexes | 重複排序值需唯一欄位作次排序；find() 回傳 cursor，findOne() 回傳文件或 null；新 cursor 的 toArray() 取得全部結果，200 筆題答案 B。 |
+| 3.1、3.6 | Indexes 考試註記／前綴 | Range 不會自動讓索引失效；跳過中間欄位仍可能利用最左前綴；以 executionStats 比較掃描量。 |
+| 3.2 | Indexes Lesson 3 | Multikey 定義題答案 B；一般複合索引的平行陣列限制以每份文件判斷。 |
+| 3.3、3.6 | Indexes 排序／覆蓋查詢 | 有索引不保證免 SORT；覆蓋查詢不需 FETCH 完整文件，不能只檢查投影欄位。 |
+| 3.5 | Indexes 索引成本／刪除 | 前綴索引是否冗餘，須確認 unique、sparse、partial、collation 等選項與工作負載。 |
+| 2.18 vs Section 3 | Search 與 Indexes | Search index 與一般資料庫索引分開複習；一般 createIndex() 不代表建立 Search index。 |
+
+### Transactions 補充教材
+
+現有目標表沒有獨立 Transactions 權重，不自行分配考試百分比。
+
+- 單文件原子性、多文件交易與 session 的差異。
+- mongosh 使用 startTransaction()、commitTransaction()、abortTransaction()；不以 shell 顯示輸出判斷方法用途。
+- 交易 read concern 可用 local、majority、snapshot；read concern 不能代替 write concern。
+- 不以「金融」作為必選 majority 的口訣；依題目要求的快照、可見性與持久性判斷。
+- abort 只放棄目前交易的變更；預設約一分鐘生命週期限制與業務類型無關。
+
+各教材末尾附有官方文件連結。CRUD、Indexes、Transactions 的題目與本表需一起維護。
+
 ### 模擬試題
 
 https://learn.mongodb.com/courses/mongodb-associate-developer-exam-study-guide
@@ -92,7 +126,7 @@ https://www.youtube.com/watch?v=9vraN5NqpaA
 
 https://www.youtube.com/watch?v=iHG6l6LhtZM
 
-https://www.validexamdumps.com/mongodb/c100dba-exam-questions
+> 分類提醒：原列 C100DBA 題庫屬 DBA 類別，非本 Developer 考綱對照來源，已移除連結。
 
 ## 考試預約
 https://go.proctoru.com/students/reservations/44603321/edit?bluebird=true
@@ -109,8 +143,9 @@ https://learn.mongodb.com/learn/course/mongodb-associate-developer-exam-java/pur
 <img width="3356" height="1062" alt="image" src="https://github.com/user-attachments/assets/73f5d62e-d92e-48d0-b564-00d059ca6bbd" />
 
 
-## pass4success
-https://www.pass4success.com/mongodb/exam/c100dba
+## 參考資料分類
+
+原列 C100DBA 題庫屬 DBA 類別，非本 Developer 考綱對照來源。答案應以官方教材與對應版本文件核對。
 
 ## 
 https://www.mongodb.com/zh-cn/docs/manual/reference/glossary/
